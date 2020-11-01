@@ -549,8 +549,14 @@ static vec4f shade_texcoord(const raytrace_scene* scene, const ray3f& ray,
 
 static vec4f shade_color(const raytrace_scene* scene, const ray3f& ray,
     int bounce, rng_state& rng, const raytrace_params& params) {
-  // YOUR CODE GOES HERE -----------------------
-  return {0, 0, 0, 0};
+  auto intersection = intersect_scene_bvh(scene, ray);
+
+  if (! intersection.hit)
+    return zero4f;
+
+  auto col3 = scene->instances[intersection.instance]->material->color;
+
+  return vec4f{col3.x, col3.y, col3.z, 0.5};
 }
 
 // Trace a single ray from the camera using the given algorithm.
@@ -575,7 +581,20 @@ static raytrace_shader_func get_shader(const raytrace_params& params) {
 void render_sample(raytrace_state* state, const raytrace_scene* scene,
     const raytrace_camera* camera, const vec2i& ij,
     const raytrace_params& params) {
-  // YOUR CODE GOES HERE -----------------------
+  auto imsizei = state->accumulation.imsize();
+  auto imsizef = vec2f{imsizei.x + 0.0f, imsizei.y + 0.0f};
+  auto puv = rand2f(state->rngs[ij]);
+  auto uv = vec2f{ij.x + puv.x, ij.y + puv.y} / imsizef;
+  auto ray = camera_ray(camera->frame, camera->lens, camera->film, uv);
+
+  auto shader = get_shader(params);
+
+  auto acc = shader(scene, ray, params.bounces, state->rngs[ij], params);
+  state->accumulation[ij] += acc;
+
+  state->samples[ij] += 1;
+
+  state->render[ij] = state->accumulation[ij] / state->samples[ij];
 }
 
 // Init a sequence of random number generators.
@@ -601,8 +620,12 @@ void init_state(raytrace_state* state, const raytrace_scene* scene,
 // Progressively compute an image by calling trace_samples multiple times.
 void render_samples(raytrace_state* state, const raytrace_scene* scene,
     const raytrace_camera* camera, const raytrace_params& params) {
-  if (params.noparallel) {
-    // YOUR CODE GOES HERE -----------------------
+  if (1 || params.noparallel) {
+    for (auto i = 0; i < state->accumulation.width(); i++) {
+      for (auto j = 0; j < state->accumulation.height(); j++) {
+        render_sample(state, scene, camera, {i,j}, params);
+      }
+    }
   } else {
     // YOUR CODE GOES HERE -----------------------
   }
