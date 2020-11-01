@@ -547,8 +547,17 @@ static vec4f shade_raytrace(const raytrace_scene* scene, const ray3f& ray,
 // Eyelight for quick previewing.
 static vec4f shade_eyelight(const raytrace_scene* scene, const ray3f& ray,
     int bounce, rng_state& rng, const raytrace_params& params) {
-  // YOUR CODE GOES HERE -----------------------
-  return {0, 0, 0, 0};
+  auto isec = intersect_scene_bvh(scene, ray);
+
+  if (! isec.hit)
+    return zero4f;
+
+  auto inst = scene->instances[isec.instance];
+  auto normal = transform_direction(inst->frame,
+    eval_normal(inst->shape, isec.element, isec.uv));
+
+  auto eyelight = inst->material->color * dot(normal, -ray.d);
+  return vec4f{normal.x, normal.y, normal.y, 0};
 }
 
 static vec4f shade_normal(const raytrace_scene* scene, const ray3f& ray,
