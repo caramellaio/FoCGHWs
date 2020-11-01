@@ -125,16 +125,32 @@ static vec3f eval_position(
 // Shape element normal.
 static vec3f eval_element_normal(const raytrace_shape* shape, int element) {
   // YOUR CODE GOES HERE -----------------------
-  return {0, 0, 0};
+  if (!shape->triangles.empty()) {
+    auto t = shape->triangles[element];
+    return triangle_normal(shape->positions[t.x], shape->positions[t.y],
+      shape->positions[t.z]);
+  }
+
+  return zero3f;
 }
 
 // Eval normal
 static vec3f eval_normal(
     const raytrace_shape* shape, int element, const vec2f& uv) {
-  // YOUR CODE GOES HERE -----------------------
-  return {0, 0, 0};
-}
 
+  if (shape->normals.empty()) {
+    auto normal = eval_element_normal(shape, element);
+
+    return normal;
+  }
+  if (!shape->triangles.empty()) {
+    auto t = shape->triangles[element];
+    return interpolate_triangle(shape->normals[t.x], shape->normals[t.y],
+        shape->normals[t.z], uv);
+  } else {
+    return zero3f;
+  }
+}
 // Eval texcoord
 static vec2f eval_texcoord(
     const raytrace_shape* shape, int element, const vec2f& uv) {
@@ -537,8 +553,18 @@ static vec4f shade_eyelight(const raytrace_scene* scene, const ray3f& ray,
 
 static vec4f shade_normal(const raytrace_scene* scene, const ray3f& ray,
     int bounce, rng_state& rng, const raytrace_params& params) {
-  // YOUR CODE GOES HERE -----------------------
-  return {0, 0, 0, 0};
+  auto isec = intersect_scene_bvh(scene, ray);
+
+  if (! isec.hit)
+    return zero4f;
+
+  auto inst = scene->instances[isec.instance];
+  auto normal = transform_direction(inst->frame,
+    eval_normal(inst->shape, isec.element, isec.uv));
+
+  normal = normal * 0.5 + 0.5;
+
+  return vec4f{normal.x, normal.y, normal.y, 0};
 }
 
 static vec4f shade_texcoord(const raytrace_scene* scene, const ray3f& ray,
