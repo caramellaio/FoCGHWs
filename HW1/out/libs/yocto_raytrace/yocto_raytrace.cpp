@@ -574,9 +574,13 @@ static vec4f shade_raytrace(const raytrace_scene* scene, const ray3f& ray,
   auto pos = transform_point(inst->frame,
     eval_position(inst->shape, isec.element, isec.uv));
   auto rad3 = inst->material->emission;
-  auto texcoord = (inst->shape, isec.element, isec.uv);
+  auto texcoord = eval_texcoord(inst->shape, isec.element, isec.uv);
   auto color = inst->material->color *
     xyz(eval_texture(inst->material->color_tex, texcoord));
+
+  if (rand1f(rng) > inst->material->opacity) {
+    return shade_raytrace(scene, ray3f{pos, -ray.d}, bounce+1, rng, params);
+  }
 
   if (bounce >= params.bounces) {
     auto res = rad3 * color;
@@ -726,7 +730,7 @@ void render_sample(raytrace_state* state, const raytrace_scene* scene,
 
   auto shader = get_shader(params);
 
-  auto acc = shader(scene, ray, 0, state->rngs[ij], params);
+  auto acc = clamp(shader(scene, ray, 0, state->rngs[ij], params), 0, params.clamp);
   state->accumulation[ij] += acc;
 
   state->samples[ij] += 1;
