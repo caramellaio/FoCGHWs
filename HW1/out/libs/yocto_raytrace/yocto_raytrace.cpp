@@ -143,10 +143,11 @@ static vec3f eval_normal(
 
     return normal;
   }
+
   if (!shape->triangles.empty()) {
     auto t = shape->triangles[element];
-    return interpolate_triangle(shape->normals[t.x], shape->normals[t.y],
-        shape->normals[t.z], uv);
+    return normalize(interpolate_triangle(shape->normals[t.x], shape->normals[t.y],
+        shape->normals[t.z], uv));
   } else {
     return zero3f;
   }
@@ -154,14 +155,33 @@ static vec3f eval_normal(
 // Eval texcoord
 static vec2f eval_texcoord(
     const raytrace_shape* shape, int element, const vec2f& uv) {
-  // YOUR CODE GOES HERE -----------------------
-  return {0, 0};
+  if (shape->texcoords.empty()) return uv;
+
+  auto t = shape->triangles[element];
+
+  return interpolate_triangle(shape->texcoords[t.x], shape->texcoords[t.y],
+    shape->texcoords[t.z], uv);
 }
 
 // Evaluate all environment color.
 static vec3f eval_environment(const raytrace_scene* scene, const ray3f& ray) {
-  // YOUR CODE GOES HERE -----------------------
-  return {0, 0, 0};
+  //auto local_dir = transform_direction(inverse(scene->environment)
+  auto emission = zero3f;
+
+  for (auto env : scene->environments) {
+    auto env_emission = zero3f;
+    auto local_dir = transform_direction(inverse(env->frame), ray.d);
+
+    auto texcoord = vec2f{
+      atan2(local_dir.z, local_dir.x) / (2 * pif),
+      acos(clamp(local_dir.y, -1.0, 1.0)) / pif};
+
+    if (texcoord.x < 0) texcoord.x += 1;
+
+    emission += env->emission * xyz(eval_texture(env->emission_tex, texcoord));
+  }
+
+  return emission;
 }
 
 }  // namespace yocto
@@ -540,8 +560,81 @@ namespace yocto {
 // Raytrace renderer.
 static vec4f shade_raytrace(const raytrace_scene* scene, const ray3f& ray,
     int bounce, rng_state& rng, const raytrace_params& params) {
-  // YOUR CODE GOES HERE -----------------------
-  return {0, 0, 0, 0};
+  auto isec = intersect_scene_bvh(scene, ray);
+
+  if (! isec.hit) {
+    auto v3 = eval_environment(scene, ray);
+
+    return vec4f{v3.x, v3.y, v3.z, 0.5};
+  }
+
+  auto inst = scene->instances[isec.instance];
+  auto normal = transform_direction(inst->frame,
+    eval_normal(inst->shape, isec.element, isec.uv));
+  auto pos = transform_point(inst->frame,
+    eval_position(inst->shape, isec.element, isec.uv));
+  auto rad3 = inst->material->emission;
+  auto texcoord = (inst->shape, isec.element, isec.uv);
+  auto color = inst->material->color *
+    xyz(eval_texture(inst->material->color_tex, texcoord));
+
+  if (bounce >= params.bounces) {
+    auto res = rad3 * color;
+    return vec4f{res.x, res.y, res.z, 0};
+  }
+
+
+  if (inst->material->transmission > 0) {
+    if (rand1f(rng) < fresnel_schlick({0.04, 1, 1}, normal, -ray.d).x) {
+      auto incoming = reflect(-ray.d, normal);
+      rad3 += xyz(shade_raytrace(scene, ray3f{pos, incoming}, bounce + 1, rng, params));
+    }
+    else {
+      auto incoming = ray.d; // - outgoing;
+      rad3 += color *
+        xyz(shade_raytrace(scene, ray3f{pos, incoming}, bounce+1, rng, params));
+    }
+  }
+  else if (inst->material->metallic > 0 && inst->material->roughness > 0) {
+    auto incoming = sample_hemisphere(normal, rand2f(rng));
+    auto halfway = normalize(-ray.d + incoming);
+
+    rad3 += (2 * pi) *
+      fresnel_schlick(color, halfway, -ray.d) *
+      microfacet_distribution(inst->material->roughness, normal, halfway) *
+      microfacet_shadowing(inst->material->roughness,normal, halfway, -ray.d,incoming) /
+      (4 * dot(normal, -ray.d) * dot(normal, incoming)) *
+      xyz(shade_raytrace(scene, ray3f{pos, incoming}, bounce+1, rng, params)) *
+      dot(normal, incoming);
+  }
+  else if (inst->material->metallic > 0 && inst->material->roughness == 0) {
+    /* polished metal */
+    auto incoming = reflect(-ray.d, normal);
+      rad3 += fresnel_schlick(color, normal, -ray.d)*
+      xyz(shade_raytrace(scene, ray3f{pos, incoming}, bounce+1, rng, params));
+  }
+  else if (inst->material->specular > 0) {
+    auto incoming = sample_hemisphere(normal, rand2f(rng));
+    auto halfway = normalize(-ray.d + incoming);
+    rad3 += (2 * pi) * (
+      color / pi * (1 - fresnel_schlick({0.04, 0.04, 0.04},halfway,-ray.d)) +
+      fresnel_schlick({0.04, 0.04, 0.04}, halfway, -ray.d) *
+      microfacet_distribution(inst->material->roughness, normal, halfway) *
+      microfacet_shadowing(inst->material->roughness, normal, halfway, -ray.d,incoming) /
+      (4 * dot(normal, -ray.d) * dot(normal, incoming))) *
+      xyz(shade_raytrace(scene, ray3f{pos, incoming},bounce+1, rng, params)) *
+      dot(normal, incoming);
+  }
+  else {
+    /* diffuse */
+    auto incoming = sample_hemisphere(normal, rand2f(rng));
+    auto ind = shade_raytrace(scene, ray3f{pos, incoming}, bounce + 1, rng, params);
+
+    rad3 += (2 * pi) * color / pi * xyz(ind) * dot(normal, incoming);
+  }
+
+
+  return vec4f{rad3.x, rad3.y, rad3.z, 0};
 }
 
 // Eyelight for quick previewing.
@@ -564,8 +657,11 @@ static vec4f shade_normal(const raytrace_scene* scene, const ray3f& ray,
     int bounce, rng_state& rng, const raytrace_params& params) {
   auto isec = intersect_scene_bvh(scene, ray);
 
-  if (! isec.hit)
+  if (! isec.hit) {
+    auto env = eval_environment(scene, ray);
+
     return zero4f;
+  }
 
   auto inst = scene->instances[isec.instance];
   auto normal = transform_direction(inst->frame,
@@ -573,13 +669,19 @@ static vec4f shade_normal(const raytrace_scene* scene, const ray3f& ray,
 
   normal = normal * 0.5 + 0.5;
 
-  return vec4f{normal.x, normal.y, normal.y, 0};
+  return vec4f{normal.x, normal.y, normal.z, 1};
 }
 
 static vec4f shade_texcoord(const raytrace_scene* scene, const ray3f& ray,
     int bounce, rng_state& rng, const raytrace_params& params) {
-  // YOUR CODE GOES HERE -----------------------
-  return {0, 0, 0, 0};
+  auto isec = intersect_scene_bvh(scene, ray);
+
+  if (! isec.hit)
+    return zero4f;
+
+  auto inst = scene->instances[isec.instance];
+  auto texcoord = eval_texcoord(inst->shape, isec.element, isec.uv);
+  return vec4f{fmod(texcoord.x, 1), fmod(texcoord.y, 1), 0, 0};
 }
 
 static vec4f shade_color(const raytrace_scene* scene, const ray3f& ray,
@@ -624,7 +726,7 @@ void render_sample(raytrace_state* state, const raytrace_scene* scene,
 
   auto shader = get_shader(params);
 
-  auto acc = shader(scene, ray, params.bounces, state->rngs[ij], params);
+  auto acc = shader(scene, ray, 0, state->rngs[ij], params);
   state->accumulation[ij] += acc;
 
   state->samples[ij] += 1;
@@ -655,14 +757,16 @@ void init_state(raytrace_state* state, const raytrace_scene* scene,
 // Progressively compute an image by calling trace_samples multiple times.
 void render_samples(raytrace_state* state, const raytrace_scene* scene,
     const raytrace_camera* camera, const raytrace_params& params) {
-  if (1 || params.noparallel) {
+  if (params.noparallel) {
     for (auto i = 0; i < state->accumulation.width(); i++) {
       for (auto j = 0; j < state->accumulation.height(); j++) {
         render_sample(state, scene, camera, {i,j}, params);
       }
     }
   } else {
-    // YOUR CODE GOES HERE -----------------------
+    parallel_for(state->accumulation.width(), state->accumulation.height(), [state, scene, camera, &params](int i, int j) {
+          render_sample(state, scene, camera, vec2i{i, j}, params);
+        });
   }
 }
 
