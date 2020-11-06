@@ -601,49 +601,60 @@ static vec4f shade_raytrace(const raytrace_scene* scene, const ray3f& ray,
   }
 
 
-  if (inst->material->transmission > 0) {
-    if (rand1f(rng) < fresnel_schlick({0.04, 1, 1}, normal, -ray.d).x) {
+  auto transmission = inst->material->transmission;
+  auto metallic = inst->material->metallic;
+  /* We consider square roughness */
+  auto roughness = inst->material->roughness * inst->material->roughness;
+  auto specular = inst->material->specular;
+
+  if (transmission > 0) {
+    //return {0, 0, 0, 0};
+    if (rand1f(rng) < fresnel_schlick({0.04, 0.04, 0.04}, normal, -ray.d).x) {
       auto incoming = reflect(-ray.d, normal);
-      rad3 += xyz(shade_raytrace(scene, ray3f{pos, incoming}, bounce + 1, rng, params));
+      rad3 += xyz(shade_raytrace(scene, ray3f{pos, incoming}, bounce, rng, params));
     }
     else {
       auto incoming = ray.d; // - outgoing;
       rad3 += color *
-        xyz(shade_raytrace(scene, ray3f{pos, incoming}, bounce+1, rng, params));
+        xyz(shade_raytrace(scene, ray3f{pos, incoming}, bounce, rng, params));
     }
   }
-  else if (inst->material->metallic > 0 && inst->material->roughness > 0) {
+  else if (metallic > 0 && roughness > 0) {
+    //return {1, 0, 0, 0};
     auto incoming = sample_hemisphere(normal, rand2f(rng));
     auto halfway = normalize(-ray.d + incoming);
 
     rad3 += (2 * pi) *
       fresnel_schlick(color, halfway, -ray.d) *
-      microfacet_distribution(inst->material->roughness, normal, halfway) *
-      microfacet_shadowing(inst->material->roughness,normal, halfway, -ray.d,incoming) /
+      microfacet_distribution(roughness, normal, halfway) *
+      microfacet_shadowing(roughness,normal, halfway, -ray.d,incoming) /
       (4 * dot(normal, -ray.d) * dot(normal, incoming)) *
       xyz(shade_raytrace(scene, ray3f{pos, incoming}, bounce+1, rng, params)) *
       dot(normal, incoming);
   }
-  else if (inst->material->metallic > 0 && inst->material->roughness == 0) {
+  else if (metallic > 0 && roughness == 0) {
+    //return {0, 1, 0, 0};
     /* polished metal */
     auto incoming = reflect(-ray.d, normal);
       rad3 += fresnel_schlick(color, normal, -ray.d)*
       xyz(shade_raytrace(scene, ray3f{pos, incoming}, bounce+1, rng, params));
   }
-  else if (inst->material->specular > 0) {
+  else if (specular > 0) {
+    //return {0, 0, 1, 0};
     auto incoming = sample_hemisphere(normal, rand2f(rng));
     auto halfway = normalize(-ray.d + incoming);
     rad3 += (2 * pi) * (
       color / pi * (1 - fresnel_schlick({0.04, 0.04, 0.04},halfway,-ray.d)) +
       fresnel_schlick({0.04, 0.04, 0.04}, halfway, -ray.d) *
-      microfacet_distribution(inst->material->roughness, normal, halfway) *
-      microfacet_shadowing(inst->material->roughness, normal, halfway, -ray.d,incoming) /
+      microfacet_distribution(roughness, normal, halfway) *
+      microfacet_shadowing(roughness, normal, halfway, -ray.d,incoming) /
       (4 * dot(normal, -ray.d) * dot(normal, incoming))) *
       xyz(shade_raytrace(scene, ray3f{pos, incoming},bounce+1, rng, params)) *
       dot(normal, incoming);
   }
   else {
     /* diffuse */
+    //return {1, 1, 1, 0};
     auto incoming = sample_hemisphere(normal, rand2f(rng));
     auto ind = shade_raytrace(scene, ray3f{pos, incoming}, bounce + 1, rng, params);
 
