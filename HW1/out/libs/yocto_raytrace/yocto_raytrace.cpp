@@ -157,10 +157,23 @@ static vec2f eval_texcoord(
     const raytrace_shape* shape, int element, const vec2f& uv) {
   if (shape->texcoords.empty()) return uv;
 
-  auto t = shape->triangles[element];
+  if (! shape->triangles.empty()) {
+    auto t = shape->triangles[element];
+    return interpolate_triangle(shape->texcoords[t.x], shape->texcoords[t.y],
+      shape->texcoords[t.z], uv);
+  }
+  else if (! shape->lines.empty()) {
+    auto line = shape->lines[element];
+    return interpolate_line(shape->texcoords[line.x], shape->texcoords[line.y], uv.x);
+  }
+  else if (! shape->points.empty()) {
+    auto point = shape->points[element];
+    return shape->texcoords[point];
+  }
+  else {
+    return zero2f;
+  }
 
-  return interpolate_triangle(shape->texcoords[t.x], shape->texcoords[t.y],
-    shape->texcoords[t.z], uv);
 }
 
 // Evaluate all environment color.
