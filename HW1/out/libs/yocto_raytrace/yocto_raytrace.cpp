@@ -124,7 +124,6 @@ static vec3f eval_position(
 
 // Shape element normal.
 static vec3f eval_element_normal(const raytrace_shape* shape, int element) {
-  // YOUR CODE GOES HERE -----------------------
   if (!shape->triangles.empty()) {
     auto t = shape->triangles[element];
     return triangle_normal(shape->positions[t.x], shape->positions[t.y],
@@ -148,7 +147,11 @@ static vec3f eval_normal(
     auto t = shape->triangles[element];
     return normalize(interpolate_triangle(shape->normals[t.x], shape->normals[t.y],
         shape->normals[t.z], uv));
-  } else {
+  } else if (!shape->lines.empty()){
+    auto line = shape->lines[element];
+    return normalize(interpolate_line(shape->normals[line.x], shape->normals[line.y], uv.x));
+  }
+  else {
     return zero3f;
   }
 }
