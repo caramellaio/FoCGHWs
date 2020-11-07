@@ -594,15 +594,24 @@ static vec4f shade_raytrace(const raytrace_scene* scene, const ray3f& ray,
   auto color = inst->material->color *
     xyz(eval_texture(inst->material->color_tex, texcoord));
 
-  if (rand1f(rng) > inst->material->opacity) {
-    return shade_raytrace(scene, ray3f{pos, -ray.d}, bounce+1, rng, params);
-  }
+  // if (dot(-ray.d, normal) < 0) normal = -normal;
+
+  auto opacity = inst->material->opacity;
+
 
   if (bounce >= params.bounces) {
     auto res = rad3 * color;
     return vec4f{res.x, res.y, res.z, 0};
   }
 
+  if (nullptr != inst->material->opacity_tex) {
+    opacity = eval_texture(inst->material->opacity_tex, texcoord).x;
+  }
+
+  if (rand1f(rng) > opacity) {
+    /* bounce to avoid shadow */
+    return shade_raytrace(scene, ray3f{pos, ray.d}, bounce, rng, params);
+  }
 
   auto transmission = inst->material->transmission;
   auto metallic = inst->material->metallic;
