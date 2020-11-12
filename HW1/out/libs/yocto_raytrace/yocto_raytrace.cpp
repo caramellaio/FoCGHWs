@@ -594,7 +594,8 @@ static vec4f shade_raytrace(const raytrace_scene* scene, const ray3f& ray,
   auto color = inst->material->color *
     xyz(eval_texture(inst->material->color_tex, texcoord));
 
-  // if (dot(-ray.d, normal) < 0) normal = -normal;
+  /* flip the normal if necessary */
+  if (dot(-ray.d, normal) < 0) normal = -normal;
 
   auto opacity = inst->material->opacity;
 
@@ -666,7 +667,6 @@ static vec4f shade_raytrace(const raytrace_scene* scene, const ray3f& ray,
   }
   else {
     /* diffuse */
-    //return {1, 1, 1, 0};
     auto incoming = sample_hemisphere(normal, rand2f(rng));
     auto ind = shade_raytrace(scene, ray3f{pos, incoming}, bounce + 1, rng, params);
 
