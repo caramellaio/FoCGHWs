@@ -200,6 +200,19 @@ static vec3f eval_environment(const raytrace_scene* scene, const ray3f& ray) {
   return emission;
 }
 
+static vec2f eval_matcap(const raytrace_shape* shape, const ray3f ray,
+  const int& element, const vec2f& uv) {
+  auto normal =
+    eval_normal(shape, element, uv);
+
+  auto reflected = reflect(-ray.d, normal);
+  auto m = 2 * sqrt(2) * sqrt(reflected.z+1.0);
+
+  reflected /= m;
+  reflected += 0.5;
+
+  return {reflected.x, reflected.y};
+}
 }  // namespace yocto
 
 // -----------------------------------------------------------------------------
@@ -628,6 +641,9 @@ static vec4f shade_raytrace(const raytrace_scene* scene, const ray3f& ray,
     }
     else {
       auto incoming = ray.d; // - outgoing;
+      //auto eta = reflectivity_to_eta({0.04, 0.04, 0.04});
+      //auto refr = refract(-ray.d, normal, mean(eta);
+
       rad3 += color *
         xyz(shade_raytrace(scene, ray3f{pos, incoming}, bounce, rng, params));
     }
@@ -903,7 +919,7 @@ static vec4f shade_eyelight(const raytrace_scene* scene, const ray3f& ray,
     eval_normal(inst->shape, isec.element, isec.uv));
 
   auto eyelight = inst->material->color * dot(normal, -ray.d);
-  return vec4f{normal.x, normal.y, normal.y, 0};
+  return vec4f{eyelight.x, eyelight.y, eyelight.z, 0};
 }
 
 static vec4f shade_normal(const raytrace_scene* scene, const ray3f& ray,
