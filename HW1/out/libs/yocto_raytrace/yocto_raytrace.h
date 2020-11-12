@@ -281,6 +281,7 @@ enum struct raytrace_shader_type {
   texcoord,  // texcoords
   color,     // colors
   matcap1,   // matcap1
+  matcap2,   // matcap2
   toon,      // toon
   refract,   // retrace with refraction
              // clang-format off
@@ -302,7 +303,7 @@ struct raytrace_params {
 };
 
 const auto raytrace_shader_names = vector<string>{
-    "raytrace", "eyelight", "normal", "texcoord", "color", "matcap1", "toon", "refract"};
+    "raytrace", "eyelight", "normal", "texcoord", "color", "matcap1", "matcap2", "toon", "refract"};
 
 // Progress report callback
 using progress_callback =

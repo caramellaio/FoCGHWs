@@ -149,7 +149,7 @@ static vec3f eval_normal(
         shape->normals[t.z], uv));
   } else if (!shape->lines.empty()){
     auto line = shape->lines[element];
-    return normalize(interpolate_line(shape->normals[line.x], shape->normals[line.y], uv.x));
+    return orthonormalize(shape->normals[line.x], shape->normals[line.y]);
   }
   else {
     return zero3f;
@@ -602,8 +602,9 @@ static vec4f shade_raytrace(const raytrace_scene* scene, const ray3f& ray,
     eval_normal(inst->shape, isec.element, isec.uv));
   auto pos = transform_point(inst->frame,
     eval_position(inst->shape, isec.element, isec.uv));
-  auto rad3 = inst->material->emission;
   auto texcoord = eval_texcoord(inst->shape, isec.element, isec.uv);
+  auto rad3 = xyz(eval_texture(inst->material->emission_tex, texcoord)) * inst->material->emission;
+
   auto color = inst->material->color *
     xyz(eval_texture(inst->material->color_tex, texcoord));
 
@@ -614,8 +615,7 @@ static vec4f shade_raytrace(const raytrace_scene* scene, const ray3f& ray,
 
 
   if (bounce >= params.bounces) {
-    auto res = rad3 * color;
-    return vec4f{res.x, res.y, res.z, 0};
+    return vec4f{rad3.x, rad3.y, rad3.z, 0};
   }
 
   if (nullptr != inst->material->opacity_tex) {
@@ -637,7 +637,7 @@ static vec4f shade_raytrace(const raytrace_scene* scene, const ray3f& ray,
     //return {0, 0, 0, 0};
     if (rand1f(rng) < fresnel_schlick({0.04, 0.04, 0.04}, normal, -ray.d).x) {
       auto incoming = reflect(-ray.d, normal);
-      rad3 += xyz(shade_raytrace(scene, ray3f{pos, incoming}, bounce, rng, params));
+      rad3 += xyz(shade_raytrace(scene, ray3f{pos, incoming}, bounce + 1, rng, params));
     }
     else {
       auto incoming = ray.d; // - outgoing;
@@ -750,7 +750,7 @@ static vec4f shade_raytrace2(const raytrace_scene* scene, const ray3f& ray,
       rad3 += xyz(shade_raytrace2(scene, ray3f{pos, incoming}, bounce, rng, params));
     }
     else {
-      auto incoming = -ray.d; // - outgoing;
+      auto incoming = -ray.d;
       auto eta = reflectivity_to_eta({0.04, 0.04, 0.04});
 
       auto inv_eta = 1 / eta;
@@ -882,6 +882,23 @@ static vec4f shade_toon(const raytrace_scene* scene, const ray3f& ray,
   return {res.x, res.y, res.z, 0};
 }
 
+
+static vec4f shade_matcap2(const raytrace_scene* scene, const ray3f& ray,
+  int bounce, rng_state& rng, const raytrace_params& params) {
+  auto isec = intersect_scene_bvh(scene, ray);
+
+  if (! isec.hit) {
+    auto env = eval_environment(scene, ray);
+    return vec4f{env.x, env.y, env.z, 0};
+  }
+  auto inst = scene->instances[isec.instance];
+  auto uv = eval_matcap(inst->shape, ray, isec.element, isec.uv);
+
+  auto res = eval_texture(inst->material->color_tex, uv);
+
+  return vec4f{res.x, res.y, res.z, 0};
+}
+
 static vec4f shade_matcap1(const raytrace_scene* scene, const ray3f& ray,
   int bounce, rng_state& rng, const raytrace_params& params) {
   auto isec = intersect_scene_bvh(scene, ray);
@@ -977,6 +994,7 @@ static raytrace_shader_func get_shader(const raytrace_params& params) {
     case raytrace_shader_type::texcoord: return shade_texcoord;
     case raytrace_shader_type::color: return shade_color;
     case raytrace_shader_type::matcap1: return shade_matcap1;
+    case raytrace_shader_type::matcap2: return shade_matcap2;
     case raytrace_shader_type::toon: return shade_toon;
     case raytrace_shader_type::refract: return shade_raytrace2;
     default: {

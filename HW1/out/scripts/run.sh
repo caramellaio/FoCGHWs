@@ -15,3 +15,15 @@
 ./bin/yraytrace tests/10_hair/hair.json -o out/lowres/10_hair_720_256.jpg -s 256 -r 720
 ./bin/yraytrace tests/11_bathroom1/bathroom1.json -o out/lowres/11_bathroom1_720_256.jpg -s 256 -b 8 -r 720
 ./bin/yraytrace tests/12_ecosys/ecosys.json -o out/lowres/12_ecosys_720_256.jpg -s 256 -r 720
+
+# toon shader
+./bin/yraytrace tests/02_matte/matte.json -o out/lowres/02_matte_720_25_toon.jpg -s 25 -r 720 -t toon
+./bin/yraytrace tests/03_texture/texture.json -o out/lowres/03_texture_720_25_toon.jpg -s 25 -r 720 -t toon
+
+#refract
+./bin/yraytrace tests/08_glass/glass.json -o out/lowres/08_glass_720_256_refract.jpg -s 256 -b 8 -r 720 -t refract
+
+# matcap 1
+./bin/yraytrace tests/03_texture/texture.json -o out/lowres/03_texture_720_25_matcap1.jpg -s 25 -r 720 -t matcap1
+# matcap 2
+./bin/yraytrace tests/03_texture/texture.json -o out/lowres/03_texture_720_25_matcap2.jpg -s 25 -r 720 -t matcap2
