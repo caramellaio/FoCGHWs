@@ -280,6 +280,9 @@ enum struct raytrace_shader_type {
   normal,    // normals
   texcoord,  // texcoords
   color,     // colors
+  matcap1,   // matcap1
+  toon,      // toon
+  refract,   // retrace with refraction
              // clang-format off
 };
 
@@ -299,7 +302,7 @@ struct raytrace_params {
 };
 
 const auto raytrace_shader_names = vector<string>{
-    "raytrace", "eyelight", "normal", "texcoord", "color"};
+    "raytrace", "eyelight", "normal", "texcoord", "color", "matcap1", "toon", "refract"};
 
 // Progress report callback
 using progress_callback =
@@ -315,7 +318,7 @@ void init_state(raytrace_state* state, const raytrace_scene* scene,
     const raytrace_camera* camera, const raytrace_params& params);
 
 // Progressively computes an image.
-void render_samples(raytrace_state* state, 
+void render_samples(raytrace_state* state,
     const raytrace_scene* scene, const raytrace_camera* camera,
     const raytrace_params& params);
 
@@ -340,7 +343,7 @@ struct raytrace_intersection {
 // Intersect ray with a bvh returning either the first or any intersection
 // depending on `find_any`. Returns the ray distance , the instance id,
 // the shape element index and the element barycentric coordinates.
-raytrace_intersection intersect_scene_bvh(const raytrace_scene* scene, 
+raytrace_intersection intersect_scene_bvh(const raytrace_scene* scene,
     const ray3f& ray, bool find_any = false, bool non_rigid_frames = true);
 raytrace_intersection intersect_instance_bvh(const raytrace_instance* instance,
     const ray3f& ray, bool find_any = false, bool non_rigid_frames = true);
