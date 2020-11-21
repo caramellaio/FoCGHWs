@@ -103,23 +103,25 @@ static vec4f eval_texture(const pathtrace_texture* texture, const vec2f& uv,
 // the lens coordinates luv.
 static ray3f eval_camera(const pathtrace_camera* camera, const vec2f& image_uv,
     const vec2f& lens_uv) {
-  // YOUR CODE GOES HERE ----------------------------------------------------
-  return {};
+  auto q = vec3f{camera->film.x * (0.5f - image_uv.x),
+    camera->film.y * (image_uv.y - 0.5f), camera->lens};
+  auto dc = -normalize(q);
+  auto e = vec3f{lens_uv.x * camera->aperture / 2,
+    lens_uv.y * camera->aperture / 2, 0};
+  auto p = dc * camera->focus / abs(dc.z);
+  auto d = normalize(p - e);
+  return ray3f{transform_point(camera->frame, e),
+    transform_direction(camera->frame, d)};
 }
 
 // Samples a camera ray at pixel ij of an image of size size with puv and luv
 // as random numbers for pixel and lens respectively
 static ray3f sample_camera(const pathtrace_camera* camera, const vec2i& ij,
     const vec2i& size, const vec2f& puv, const vec2f& luv) {
-  auto q = vec3f{camera->film.x * (0.5f - puv.x),
-    camera->film.y * (puv.y - 0.5f), camera->lens};
-  auto dc = -normalize(q);
-  auto e = vec3f{luv.x * camera->aperture / 2,
-    luv.y * camera->aperture / 2, 0};
-  auto p = dc * camera->focus / abs(dc.z);
-  auto d = normalize(p - e);
-  return ray3f{transform_point(camera->frame, e),
-    transform_direction(camera->frame, d)};
+  auto uv = vec2f{(ij.x + puv.x) / size.x,
+                  (ij.y + puv.y) / size.y};
+
+  return eval_camera(camera, uv, sample_disk(luv));
 }
 
 // Eval position
