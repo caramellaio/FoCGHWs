@@ -912,22 +912,154 @@ static float sample_delta_pdf(const pathtrace_brdf& brdf, const vec3f& normal,
 // Sample lights wrt solid angle
 static vec3f sample_lights(const pathtrace_scene* scene, const vec3f& position,
     float rl, float rel, const vec2f& ruv) {
-  // YOUR CODE GOES HERE ----------------------------------------------------
-  return {0, 0, 0};
+  auto lid = sample_uniform(scene->lights.size(), rl);
+  auto light = scene->lights[lid];
+
+  if (light->instance) {
+    auto tid = sample_discrete_cdf(light->cdf, rel);
+    auto uv = sample_triangle(ruv);
+    auto lp = eval_position(light->instance, tid, uv);
+
+    return normalize(lp - position);
+  }
+  else if (light->environment) {
+    auto texture = light->environment->emission_tex;
+    auto tid = sample_discrete_cdf(light->cdf, rel);
+    auto size = texture_size(texture);
+    auto uv = vec2f{(tid % size.x + ruv.x) / size.x,
+                    (tid / size.x + ruv.y) / size.y};
+
+    return transform_direction(light->environment->frame,
+      {cos(uv.x * 2 * pif) * sin(uv.y * pif),
+       cos(uv.y * pi),
+       sin(uv.x * 2 * pi) * sin(uv.y * pif)});
+  }
+
+  return zero3f;
 }
 
 // Sample lights pdf
 static float sample_lights_pdf(const pathtrace_scene* scene,
     const vec3f& position, const vec3f& direction) {
-  // YOUR CODE GOES HERE ----------------------------------------------------
-  return 0;
+  auto pdf = 0.0f;
+
+  for (auto light : scene->lights) {
+    if (light->instance) {
+      auto lpdf = 0.0f;
+      auto np = position;
+
+      for (auto bounce = 0; bounce < 100; bounce++) {
+        auto isec = intersect_scene_bvh(scene, ray3f{np, direction});
+
+        if (!isec.hit)
+          break;
+
+        auto instance = scene->instances[isec.instance];
+        auto lp = eval_position(instance, isec.element, isec.uv);
+        auto ln = eval_shading_normal(instance, isec.element, isec.uv, direction);
+
+        auto area = light->cdf.back();
+        lpdf += distance_squared(lp, position) / abs(dot(ln, direction) * area);
+
+        // continue ray
+        np = lp + direction * 1e-3f;
+      }
+      pdf += lpdf;
+    }
+    else if (light->environment) {
+      auto texture = light->environment->emission_tex;
+      auto size = texture_size(texture);
+      auto wl = transform_direction(
+        inverse(light->environment->frame), direction);
+      auto texcoord = vec2f{atan2(wl.z, wl.x) / (2 * pif),
+        acos(clamp(wl.y, -1.0f, 1.0f)) / pif};
+
+      if (texcoord.x < 0)
+        texcoord.x += 1;
+
+      auto i = clamp((int)(texcoord.x * size.x), 0, size.x - 1);
+      auto j = clamp((int)(texcoord.y * size.y), 0, size.y - 1);
+
+      auto prob = sample_discrete_cdf_pdf(light->cdf, j*size.x+i) /
+        light->cdf.back();
+      auto angle = (2 * pif / size.x) * (pif / size.y) *
+        sin(pif * (j + 0.5f) / size.y);
+
+      pdf += prob / angle;
+    }
+  }
+
+  pdf *= sample_uniform_pdf(scene->lights.size());
+  return pdf;
 }
 
 // Path tracing.
 static vec4f shade_path(const pathtrace_scene* scene, const ray3f& ray_,
     rng_state& rng, const pathtrace_params& params) {
-  // YOUR CODE GOES HERE ----------------------------------------------------
-  return {0, 0, 0, 0};
+  /* initialization */
+  auto w = vec3f{1, 1, 1};
+  auto ray = ray_;
+  auto l = zero3f;
+
+  for (auto bounce = 0; bounce < params.bounces; bounce++) {
+    auto isec = intersect_scene_bvh(scene, ray);
+
+    if (! isec.hit) {
+      l += w * eval_environment(scene, ray);
+      break;
+    }
+
+    // prepare shading point
+    auto outgoing = -ray.d;
+    auto instance = scene->instances[isec.instance];
+    auto element  = isec.element;
+    auto uv       = isec.uv;
+    auto position = eval_position(instance, element, uv);
+    auto normal   = eval_shading_normal(instance, element, uv, outgoing);
+    auto emission = eval_emission(instance, element, uv, normal, outgoing);
+    auto brdf     = eval_brdf(instance, element, uv, normal, outgoing);
+
+    // handle opacity
+    if (brdf.opacity < 1 && rand1f(rng) >= brdf.opacity) {
+      ray = {position + ray.d * 1e-2f, ray.d};
+      bounce -= 1;
+      continue;
+    }
+
+    l += w * emission;
+
+    auto incoming = zero3f;
+
+    if (!is_delta(brdf)) {
+      if (rand1f(rng) < 0.5) {
+        incoming = sample_brdfcos(brdf, normal, outgoing, rand1f(rng), rand2f(rng));
+      }
+      else {
+        incoming = sample_lights(scene, position,
+          rand1f(rng), rand1f(rng), rand2f(rng));
+      }
+
+      w *= eval_brdfcos(brdf, normal, incoming, outgoing) * 2 /
+        (sample_brdfcos_pdf(brdf, normal, incoming, outgoing)+
+         sample_lights_pdf(scene, position, incoming));
+    }
+    else {
+      incoming = sample_delta(brdf, normal, outgoing, rand1f(rng));
+      w *= eval_delta(brdf, normal, incoming, outgoing) /
+        sample_delta_pdf(brdf, normal, incoming, outgoing);
+    }
+
+
+    if (w == zero3f || !isfinite(w)) break;
+
+    /* russian roulette */
+    if (rand1f(rng) >= min(1.0f, max(w))) break;
+
+    //w *= 1 / min(1.0f, max(w));
+    ray = {position, incoming};
+  }
+
+  return {l.x, l.y, l.z, 0};
 }
 
 // Recursive path tracing.
