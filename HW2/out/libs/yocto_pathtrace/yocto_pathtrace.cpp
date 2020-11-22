@@ -966,14 +966,15 @@ static vec4f shade_naive(const pathtrace_scene* scene, const ray3f& ray_,
 
     l += w * emission;
 
+    auto incoming = zero3f;
+
     if (!is_delta(brdf)) {
-      auto incoming = sample_brdfcos(brdf, normal, outgoing, rand1f(rng), rand2f(rng));
+      incoming = sample_brdfcos(brdf, normal, outgoing, rand1f(rng), rand2f(rng));
       w *= eval_brdfcos(brdf, normal, incoming, outgoing) /
         sample_brdfcos_pdf(brdf, normal, incoming, outgoing);
     }
     else {
-      break;
-      auto incoming = sample_delta(brdf, normal, outgoing, rand1f(rng));
+      incoming = sample_delta(brdf, normal, outgoing, rand1f(rng));
       w *= eval_delta(brdf, normal, incoming, outgoing) /
         sample_delta_pdf(brdf, normal, incoming, outgoing);
     }
@@ -984,7 +985,7 @@ static vec4f shade_naive(const pathtrace_scene* scene, const ray3f& ray_,
     /* russian roulette */
     if (rand1f(rng) >= min(1.0f, max(w))) break;
 
-    w *= 1 / min(1.0f, max(w));
+    //w *= 1 / min(1.0f, max(w));
     ray = {position, incoming};
   }
 
