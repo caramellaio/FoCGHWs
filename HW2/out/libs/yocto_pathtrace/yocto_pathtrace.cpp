@@ -736,7 +736,7 @@ static vec3f eval_brdfcos(const pathtrace_brdf& brdf, const vec3f& normal,
     brdfcos += brdf.metal * eval_microfacet_reflection(brdf.meta, brdf.metak, brdf.roughness,
       normal, outgoing, incoming);
   if (mean(brdf.transmission) > 0)
-    brdfcos += brdf.transmission * eval_microfacet_reflection(brdf.ior, brdf.roughness,
+    brdfcos += brdf.transmission * eval_microfacet_transmission(brdf.ior, brdf.roughness,
       normal, outgoing, incoming);
 
   return brdfcos;
@@ -746,8 +746,24 @@ static vec3f eval_delta(const pathtrace_brdf& brdf, const vec3f& normal,
     const vec3f& outgoing, const vec3f& incoming) {
   if (brdf.roughness != 0) return zero3f;
 
-  // YOUR CODE GOES HERE ----------------------------------------------------
-  return {0, 0, 0};
+  auto brdfcos = zero3f;
+
+  if (mean(brdf.diffuse) > 0)
+    //brdfcos += brdf.diffuse * eval_diffuse_reflection(normal, outgoing, incoming);
+    /* TODO: idk dude */
+    #include <cassert>
+    assert(false);
+
+  if (mean(brdf.specular) > 0)
+    brdfcos += brdf.specular * eval_delta_reflection(brdf.ior, normal, outgoing, incoming);
+  if (mean(brdf.metal) > 0)
+    brdfcos += brdf.metal * eval_delta_reflection(brdf.meta, brdf.metak,
+      normal, outgoing, incoming);
+  if (mean(brdf.transmission) > 0)
+    brdfcos += brdf.transmission * eval_delta_transmission(brdf.ior, normal,
+      outgoing, incoming);
+
+  return brdfcos;
 }
 
 // Picks a direction based on the BRDF
@@ -795,8 +811,39 @@ static vec3f sample_delta(const pathtrace_brdf& brdf, const vec3f& normal,
     const vec3f& outgoing, float rnl) {
   if (brdf.roughness != 0) return zero3f;
 
-  // YOUR CODE GOES HERE ----------------------------------------------------
-  return {0, 0, 0};
+  auto cdf = 0.0f;
+
+  if (brdf.diffuse_pdf) {
+    cdf += brdf.diffuse_pdf;
+
+    #include<assert.h>
+    /* TODO: Check if this case might happen! */
+    assert(false);
+    return zero3f;
+  }
+
+  if (brdf.specular_pdf) {
+    cdf += brdf.specular_pdf;
+
+    if (rnl < cdf)
+      return sample_delta_reflection(brdf.ior, normal, outgoing);
+  }
+
+  if (brdf.metal_pdf) {
+    cdf += brdf.metal_pdf;
+    if (rnl < cdf) {
+      return sample_delta_reflection(brdf.meta, brdf.metak, normal, outgoing);
+    }
+  }
+
+  if (brdf.transmission_pdf) {
+    cdf += brdf.transmission_pdf;
+
+    if (rnl < cdf)
+      return sample_delta_transmission(brdf.ior, normal, outgoing);
+  }
+
+  return zero3f;
 }
 
 // Compute the weight for sampling the BRDF
@@ -836,8 +883,30 @@ static float sample_delta_pdf(const pathtrace_brdf& brdf, const vec3f& normal,
     const vec3f& outgoing, const vec3f& incoming) {
   if (brdf.roughness != 0) return 0;
 
-  // YOUR CODE GOES HERE ----------------------------------------------------
-  return 0;
+  auto pdf = 0.0f;
+
+  if (brdf.diffuse_pdf) {
+    #include<cassert>
+    assert(false);
+  }
+
+  if (brdf.specular_pdf) {
+    pdf += brdf.specular_pdf *
+      sample_delta_reflection_pdf(brdf.ior, normal, outgoing, incoming);
+  }
+
+  if (brdf.metal_pdf) {
+    pdf += brdf.metal_pdf *
+      sample_delta_reflection_pdf(brdf.meta, brdf.metak, normal, outgoing, incoming);
+  }
+
+  if (brdf.transmission_pdf) {
+    pdf += brdf.transmission_pdf *
+      sample_delta_transmission_pdf(brdf.ior, normal,
+        outgoing, incoming);
+  }
+
+  return pdf;
 }
 
 // Sample lights wrt solid angle
@@ -895,11 +964,9 @@ static vec4f shade_naive(const pathtrace_scene* scene, const ray3f& ray_,
       continue;
     }
 
-    auto incoming = zero3f;
-
     l += w * emission;
 
-    if (!is_delta(brdf) || true) {
+    if (!is_delta(brdf)) {
       auto incoming = sample_brdfcos(brdf, normal, outgoing, rand1f(rng), rand2f(rng));
       w *= eval_brdfcos(brdf, normal, incoming, outgoing) /
         sample_brdfcos_pdf(brdf, normal, incoming, outgoing);
