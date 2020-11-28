@@ -748,18 +748,12 @@ static vec3f eval_delta(const pathtrace_brdf& brdf, const vec3f& normal,
 
   auto brdfcos = zero3f;
 
-  if (mean(brdf.diffuse) > 0)
-    //brdfcos += brdf.diffuse * eval_diffuse_reflection(normal, outgoing, incoming);
-    /* TODO: idk dude */
-    #include <cassert>
-    assert(false);
-
-  if (mean(brdf.specular) > 0)
+  if (brdf.specular != zero3f)
     brdfcos += brdf.specular * eval_delta_reflection(brdf.ior, normal, outgoing, incoming);
-  if (mean(brdf.metal) > 0)
+  if (brdf.metal != zero3f)
     brdfcos += brdf.metal * eval_delta_reflection(brdf.meta, brdf.metak,
       normal, outgoing, incoming);
-  if (mean(brdf.transmission) > 0)
+  if (brdf.transmission != zero3f)
     brdfcos += brdf.transmission * eval_delta_transmission(brdf.ior, normal,
       outgoing, incoming);
 
@@ -812,15 +806,6 @@ static vec3f sample_delta(const pathtrace_brdf& brdf, const vec3f& normal,
   if (brdf.roughness != 0) return zero3f;
 
   auto cdf = 0.0f;
-
-  if (brdf.diffuse_pdf) {
-    cdf += brdf.diffuse_pdf;
-
-    #include<assert.h>
-    /* TODO: Check if this case might happen! */
-    assert(false);
-    return zero3f;
-  }
 
   if (brdf.specular_pdf) {
     cdf += brdf.specular_pdf;
@@ -923,16 +908,21 @@ static vec3f sample_lights(const pathtrace_scene* scene, const vec3f& position,
     return normalize(lp - position);
   }
   else if (light->environment) {
-    auto texture = light->environment->emission_tex;
-    auto tid = sample_discrete_cdf(light->cdf, rel);
-    auto size = texture_size(texture);
-    auto uv = vec2f{(tid % size.x + ruv.x) / size.x,
-                    (tid / size.x + ruv.y) / size.y};
+    if (light->environment->emission_tex) {
+      auto texture = light->environment->emission_tex;
+      auto tid = sample_discrete_cdf(light->cdf, rel);
+      auto size = texture_size(texture);
+      auto uv = vec2f{(tid % size.x + ruv.x) / size.x,
+                      (tid / size.x + ruv.y) / size.y};
 
-    return transform_direction(light->environment->frame,
-      {cos(uv.x * 2 * pif) * sin(uv.y * pif),
-       cos(uv.y * pi),
-       sin(uv.x * 2 * pi) * sin(uv.y * pif)});
+      return transform_direction(light->environment->frame,
+        {cos(uv.x * 2 * pif) * sin(uv.y * pif),
+         cos(uv.y * pi),
+         sin(uv.x * 2 * pif) * sin(uv.y * pif)});
+    }
+    else {
+      return sample_sphere(ruv);
+    }
   }
 
   return zero3f;
@@ -1114,7 +1104,7 @@ static vec4f shade_naive(const pathtrace_scene* scene, const ray3f& ray_,
     /* russian roulette */
     if (rand1f(rng) >= min(1.0f, max(w))) break;
 
-    //w *= 1 / min(1.0f, max(w));
+    w *= 1 / min(1.0f, max(w));
     ray = {position, incoming};
   }
 
