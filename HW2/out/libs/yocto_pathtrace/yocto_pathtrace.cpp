@@ -917,7 +917,7 @@ static vec3f sample_lights(const pathtrace_scene* scene, const vec3f& position,
 
   if (light->instance) {
     auto tid = sample_discrete_cdf(light->cdf, rel);
-    auto uv = sample_triangle(ruv);
+    auto uv = (!light->instance->shape->triangles.empty()) ? sample_triangle(ruv): ruv;
     auto lp = eval_position(light->instance, tid, uv);
 
     return normalize(lp - position);
@@ -1039,8 +1039,8 @@ static vec4f shade_path(const pathtrace_scene* scene, const ray3f& ray_,
           rand1f(rng), rand1f(rng), rand2f(rng));
       }
 
-      w *= eval_brdfcos(brdf, normal, incoming, outgoing) * 2 /
-        (sample_brdfcos_pdf(brdf, normal, incoming, outgoing)+
+      w *= 2 * eval_brdfcos(brdf, normal, outgoing, incoming) /
+        (sample_brdfcos_pdf(brdf, normal, outgoing, incoming) +
          sample_lights_pdf(scene, position, incoming));
     }
     else {
@@ -1051,9 +1051,6 @@ static vec4f shade_path(const pathtrace_scene* scene, const ray3f& ray_,
 
 
     if (w == zero3f || !isfinite(w)) break;
-
-    /* russian roulette */
-    if (rand1f(rng) >= min(1.0f, max(w))) break;
 
     //w *= 1 / min(1.0f, max(w));
     ray = {position, incoming};
@@ -1102,13 +1099,13 @@ static vec4f shade_naive(const pathtrace_scene* scene, const ray3f& ray_,
 
     if (!is_delta(brdf)) {
       incoming = sample_brdfcos(brdf, normal, outgoing, rand1f(rng), rand2f(rng));
-      w *= eval_brdfcos(brdf, normal, incoming, outgoing) /
-        sample_brdfcos_pdf(brdf, normal, incoming, outgoing);
+      w *= eval_brdfcos(brdf, normal, outgoing, incoming) /
+        sample_brdfcos_pdf(brdf, normal, outgoing, incoming);
     }
     else {
       incoming = sample_delta(brdf, normal, outgoing, rand1f(rng));
-      w *= eval_delta(brdf, normal, incoming, outgoing) /
-        sample_delta_pdf(brdf, normal, incoming, outgoing);
+      w *= eval_delta(brdf, normal, outgoing, incoming) /
+        sample_delta_pdf(brdf, normal, outgoing, incoming);
     }
 
 
