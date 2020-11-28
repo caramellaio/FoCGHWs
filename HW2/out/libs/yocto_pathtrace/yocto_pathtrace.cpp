@@ -784,6 +784,7 @@ static vec3f sample_brdfcos(const pathtrace_brdf& brdf, const vec3f& normal,
 
   if (brdf.metal_pdf) {
     cdf += brdf.metal_pdf;
+
     if (rnl < cdf) {
       return sample_microfacet_reflection(brdf.meta, brdf.metak,
         brdf.roughness, normal, outgoing, rn);
@@ -798,14 +799,14 @@ static vec3f sample_brdfcos(const pathtrace_brdf& brdf, const vec3f& normal,
         outgoing, rn);
   }
 
-  return {0, 0, 0};
+  return zero3f;
 }
 
 static vec3f sample_delta(const pathtrace_brdf& brdf, const vec3f& normal,
     const vec3f& outgoing, float rnl) {
   if (brdf.roughness != 0) return zero3f;
 
-  auto cdf = 0.0f;
+  auto cdf = brdf.diffuse_pdf;
 
   if (brdf.specular_pdf) {
     cdf += brdf.specular_pdf;
@@ -816,6 +817,7 @@ static vec3f sample_delta(const pathtrace_brdf& brdf, const vec3f& normal,
 
   if (brdf.metal_pdf) {
     cdf += brdf.metal_pdf;
+
     if (rnl < cdf) {
       return sample_delta_reflection(brdf.meta, brdf.metak, normal, outgoing);
     }
@@ -939,14 +941,13 @@ static float sample_lights_pdf(const pathtrace_scene* scene,
       auto np = position;
 
       for (auto bounce = 0; bounce < 100; bounce++) {
-        auto isec = intersect_scene_bvh(scene, ray3f{np, direction});
+        auto isec = intersect_instance_bvh(light->instance, ray3f{np, direction});
 
         if (!isec.hit)
           break;
 
-        auto instance = scene->instances[isec.instance];
-        auto lp = eval_position(instance, isec.element, isec.uv);
-        auto ln = eval_shading_normal(instance, isec.element, isec.uv, direction);
+        auto lp = eval_position(light->instance, isec.element, isec.uv);
+        auto ln = eval_normal(light->instance, isec.element, isec.uv);
 
         auto area = light->cdf.back();
         lpdf += distance_squared(lp, position) / abs(dot(ln, direction) * area);
@@ -957,25 +958,30 @@ static float sample_lights_pdf(const pathtrace_scene* scene,
       pdf += lpdf;
     }
     else if (light->environment) {
-      auto texture = light->environment->emission_tex;
-      auto size = texture_size(texture);
-      auto wl = transform_direction(
-        inverse(light->environment->frame), direction);
-      auto texcoord = vec2f{atan2(wl.z, wl.x) / (2 * pif),
-        acos(clamp(wl.y, -1.0f, 1.0f)) / pif};
+      if (light->environment->emission_tex) {
+        auto texture = light->environment->emission_tex;
+        auto size = texture_size(texture);
+        auto wl = transform_direction(
+          inverse(light->environment->frame), direction);
+        auto texcoord = vec2f{atan2(wl.z, wl.x) / (2 * pif),
+          acos(clamp(wl.y, -1.0f, 1.0f)) / pif};
 
-      if (texcoord.x < 0)
-        texcoord.x += 1;
+        if (texcoord.x < 0)
+          texcoord.x += 1;
 
-      auto i = clamp((int)(texcoord.x * size.x), 0, size.x - 1);
-      auto j = clamp((int)(texcoord.y * size.y), 0, size.y - 1);
+        auto i = clamp((int)(texcoord.x * size.x), 0, size.x - 1);
+        auto j = clamp((int)(texcoord.y * size.y), 0, size.y - 1);
 
-      auto prob = sample_discrete_cdf_pdf(light->cdf, j*size.x+i) /
-        light->cdf.back();
-      auto angle = (2 * pif / size.x) * (pif / size.y) *
-        sin(pif * (j + 0.5f) / size.y);
+        auto prob = sample_discrete_cdf_pdf(light->cdf, j*size.x+i) /
+          light->cdf.back();
+        auto angle = (2 * pif / size.x) * (pif / size.y) *
+          sin(pif * (j + 0.5f) / size.y);
 
-      pdf += prob / angle;
+        pdf += prob / angle;
+      }
+      else {
+        pdf += 1 / (4 * pif);
+      }
     }
   }
 
@@ -1035,14 +1041,14 @@ static vec4f shade_path(const pathtrace_scene* scene, const ray3f& ray_,
     }
     else {
       incoming = sample_delta(brdf, normal, outgoing, rand1f(rng));
-      w *= eval_delta(brdf, normal, incoming, outgoing) /
-        sample_delta_pdf(brdf, normal, incoming, outgoing);
+      w *= eval_delta(brdf, normal, outgoing, incoming) /
+        sample_delta_pdf(brdf, normal, outgoing, incoming);
     }
 
 
     if (w == zero3f || !isfinite(w)) break;
 
-    //w *= 1 / min(1.0f, max(w));
+
     ray = {position, incoming};
   }
 
@@ -1097,7 +1103,6 @@ static vec4f shade_naive(const pathtrace_scene* scene, const ray3f& ray_,
       w *= eval_delta(brdf, normal, outgoing, incoming) /
         sample_delta_pdf(brdf, normal, outgoing, incoming);
     }
-
 
     if (w == zero3f || !isfinite(w)) break;
 
