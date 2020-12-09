@@ -726,19 +726,24 @@ static vec3f eval_brdfcos(const pathtrace_brdf& brdf, const vec3f& normal,
 
   auto brdfcos = zero3f;
 
-  if (mean(brdf.diffuse) > 0)
+  if (brdf.diffuse != zero3f)
     brdfcos += brdf.diffuse * eval_diffuse_reflection(normal, outgoing, incoming);
 
-  if (mean(brdf.specular) > 0)
+  if (brdf.specular != zero3f && brdf.refraction == zero3f)
     brdfcos += brdf.specular * eval_microfacet_reflection(brdf.ior, brdf.roughness,
       normal, outgoing, incoming);
-  if (mean(brdf.metal) > 0)
+
+  if (brdf.metal != zero3f)
     brdfcos += brdf.metal * eval_microfacet_reflection(brdf.meta, brdf.metak, brdf.roughness,
       normal, outgoing, incoming);
-  if (mean(brdf.transmission) > 0)
+
+  if (brdf.transmission != zero3f)
     brdfcos += brdf.transmission * eval_microfacet_transmission(brdf.ior, brdf.roughness,
       normal, outgoing, incoming);
 
+  if (brdf.refraction != zero3f)
+    brdfcos += brdf.refraction * eval_microfacet_refraction(brdf.ior, brdf.roughness,
+      normal, outgoing, incoming);
   return brdfcos;
 }
 
@@ -748,14 +753,21 @@ static vec3f eval_delta(const pathtrace_brdf& brdf, const vec3f& normal,
 
   auto brdfcos = zero3f;
 
-  if (brdf.specular != zero3f)
+  if (brdf.specular != zero3f && brdf.refraction == zero3f)
     brdfcos += brdf.specular * eval_delta_reflection(brdf.ior, normal, outgoing, incoming);
+
   if (brdf.metal != zero3f)
     brdfcos += brdf.metal * eval_delta_reflection(brdf.meta, brdf.metak,
       normal, outgoing, incoming);
+
   if (brdf.transmission != zero3f)
     brdfcos += brdf.transmission * eval_delta_transmission(brdf.ior, normal,
       outgoing, incoming);
+
+  if (brdf.refraction != zero3f) {
+    brdfcos += brdf.refraction *
+      eval_delta_refraction(brdf.ior, normal, outgoing, incoming);
+  }
 
   return brdfcos;
 }
@@ -774,7 +786,7 @@ static vec3f sample_brdfcos(const pathtrace_brdf& brdf, const vec3f& normal,
       return sample_diffuse_reflection(normal, outgoing, rn);
   }
 
-  if (brdf.specular_pdf) {
+  if (brdf.specular_pdf && ! brdf.refraction_pdf) {
     cdf += brdf.specular_pdf;
 
     if (rnl < cdf)
@@ -799,6 +811,15 @@ static vec3f sample_brdfcos(const pathtrace_brdf& brdf, const vec3f& normal,
         outgoing, rn);
   }
 
+  if (brdf.refraction_pdf) {
+    cdf += brdf.refraction_pdf;
+
+    if (rnl < cdf) {
+      return sample_microfacet_refraction(brdf.ior, brdf.roughness, normal,
+        outgoing, rnl, rn);
+    }
+  }
+
   return zero3f;
 }
 
@@ -808,7 +829,7 @@ static vec3f sample_delta(const pathtrace_brdf& brdf, const vec3f& normal,
 
   auto cdf = brdf.diffuse_pdf;
 
-  if (brdf.specular_pdf) {
+  if (brdf.specular_pdf && !brdf.refraction_pdf) {
     cdf += brdf.specular_pdf;
 
     if (rnl < cdf)
@@ -830,6 +851,13 @@ static vec3f sample_delta(const pathtrace_brdf& brdf, const vec3f& normal,
       return sample_delta_transmission(brdf.ior, normal, outgoing);
   }
 
+  if (brdf.refraction_pdf) {
+    cdf += brdf.refraction_pdf;
+
+    if (rnl < cdf)
+      return sample_delta_refraction(brdf.ior, normal, outgoing, rnl);
+  }
+
   return zero3f;
 }
 
@@ -845,7 +873,7 @@ static float sample_brdfcos_pdf(const pathtrace_brdf& brdf, const vec3f& normal,
       sample_diffuse_reflection_pdf(normal, outgoing, incoming);
   }
 
-  if (brdf.specular_pdf) {
+  if (brdf.specular_pdf && !brdf.refraction_pdf) {
     pdf += brdf.specular_pdf *
       sample_microfacet_reflection_pdf(brdf.ior, brdf.roughness,
         normal, outgoing, incoming);
@@ -863,6 +891,11 @@ static float sample_brdfcos_pdf(const pathtrace_brdf& brdf, const vec3f& normal,
         outgoing, incoming);
   }
 
+  if (brdf.refraction_pdf) {
+    pdf += brdf.refraction_pdf * sample_microfacet_refraction_pdf(brdf.ior,
+      brdf.roughness, normal, outgoing, incoming);
+  }
+
   return pdf;
 }
 
@@ -872,12 +905,7 @@ static float sample_delta_pdf(const pathtrace_brdf& brdf, const vec3f& normal,
 
   auto pdf = 0.0f;
 
-  if (brdf.diffuse_pdf) {
-    #include<cassert>
-    assert(false);
-  }
-
-  if (brdf.specular_pdf) {
+  if (brdf.specular_pdf && !brdf.refraction_pdf) {
     pdf += brdf.specular_pdf *
       sample_delta_reflection_pdf(brdf.ior, normal, outgoing, incoming);
   }
@@ -891,6 +919,11 @@ static float sample_delta_pdf(const pathtrace_brdf& brdf, const vec3f& normal,
     pdf += brdf.transmission_pdf *
       sample_delta_transmission_pdf(brdf.ior, normal,
         outgoing, incoming);
+  }
+
+  if (brdf.refraction_pdf) {
+    pdf += brdf.refraction_pdf *
+      sample_delta_refraction_pdf(brdf.ior, normal, outgoing, incoming);
   }
 
   return pdf;
@@ -1048,6 +1081,11 @@ static vec4f shade_path(const pathtrace_scene* scene, const ray3f& ray_,
 
     if (w == zero3f || !isfinite(w)) break;
 
+
+    if (bounce > 3) {
+      if (rand1f(rng) >= min(1.0f, max(w))) break;
+      w *= 1 / min(1.0f, max(w));
+    }
 
     ray = {position, incoming};
   }
