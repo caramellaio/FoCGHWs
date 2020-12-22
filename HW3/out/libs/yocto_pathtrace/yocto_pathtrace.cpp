@@ -226,7 +226,24 @@ static pair<vec3f, vec3f> eval_element_tangents(
 static vec3f eval_normalmap(
     const pathtrace_instance* instance, int element, const vec2f& uv) {
   // YOUR CODE GOES HERE -----------------------------------------------------
-  return eval_normal(instance, element, uv);
+  auto shape      = instance->shape;
+  auto normal_tex = instance->material->normal_tex;
+  // apply normal mapping
+  auto normal   = eval_normal(instance, element, uv);
+  auto texcoord = eval_texcoord(instance, element, uv);
+  if (normal_tex != nullptr &&
+      (!shape->triangles.empty() || !shape->quadspos.empty())) {
+    auto normalmap = -1 + 2 * xyz(eval_texture(normal_tex, texcoord, true));
+    auto [tu, tv]  = eval_element_tangents(instance, element);
+    auto frame     = frame3f{tu, tv, normal, zero3f};
+    frame.x        = orthonormalize(frame.x, frame.z);
+    frame.y        = normalize(cross(frame.z, frame.x));
+    auto flip_v    = dot(frame.y, tv) < 0;
+    normalmap.y *= flip_v ? 1 : -1;  // flip vertical axis
+    normal = transform_normal(frame, normalmap);
+  }
+
+  return normal;
 }
 
 // Eval shading normal
@@ -1427,57 +1444,43 @@ namespace yocto {
 template <typename T>
 static void tesselate_catmullclark(
     std::vector<vec4i>& quads, std::vector<T>& vert, bool lock_boundary) {
-  /* init vertices */
-  // construct map and boundary
   auto emap = make_edge_map(quads);
   auto edges = get_edges(emap);
   auto boundary = get_boundary(emap);
-  // init number of elements
+  // initialize number of elements
   auto nv = (int)vert.size();
   auto ne = (int)edges.size();
   auto nb = (int)boundary.size();
   auto nf = (int)quads.size();
 
-  if (lock_boundary)
-    printf("num b: %d, ne=%d\n", nb, ne);
-  /* linear subdivision */
-
-  // create vertices
   auto tverts = vector<T>();
+  for (auto v : vert) // vertices [0, nv)
+  tverts.push_back(v);
+  for (auto e : edges) // edge vertices [nv, nv+ne)
+  tverts.push_back((vert[e.x] + vert[e.y]) / 2);
+  for (auto q : quads) // face vertices [nv+ne, nv+ne+nf)
+  if (q.z != q.w) // quads
+  tverts.push_back((vert[q.x] + vert[q.y] +
+  vert[q.z] + vert[q.w]) / 4);
+  else // triangles
+  tverts.push_back((vert[q.x] + vert[q.y] +
+  vert[q.z]) / 3);
 
-  for (auto v : vert)
-    tverts.push_back(v);
-
-  for (auto e : edges)
-    tverts.push_back((vert[e.x] + vert[e.y]) / 2);
-
-  for (auto q : quads) {
-    if (q.z != q.w) {
-      tverts.push_back((vert[q.x] + vert[q.y] +
-                        vert[q.z] + vert[q.w]) / 4);
-    }
-    else {
-      tverts.push_back((vert[q.x] + vert[q.y] +
-                        vert[q.z]) / 3);
-    }
-  }
-
-  // create faces
   auto tquads = vector<vec4i>();
 
-  for (auto i = 0; i < nf; i++) {
+  for (auto i = 0; i < quads.size(); i++) {
     auto q = quads[i];
-    if (q.z != q.w) {
-      tquads.push_back({q.x, nv+edge_index(emap, {q.x, q.y}),
+
+    if(q.z != q.w) {
+      tquads.push_back({q.x,nv+edge_index(emap, {q.x,q.y}),
         nv+ne+i, nv+edge_index(emap, {q.w, q.x})});
-      tquads.push_back({q.y, nv+edge_index(emap, {q.y, q.z}),
-        nv+ne+i, nv+edge_index(emap, {q.x, q.y})});
-      tquads.push_back({q.z, nv+edge_index(emap,{q.z, q.w}),
+      tquads.push_back({q.y,nv+edge_index(emap, {q.y,q.z}),
+        nv+ne+i, nv+edge_index(emap,{q.x, q.y})});
+      tquads.push_back({q.z, nv+edge_index(emap, {q.z, q.w}),
         nv+ne+i, nv+edge_index(emap, {q.y, q.z})});
       tquads.push_back({q.w, nv+edge_index(emap, {q.w, q.x}),
         nv+ne+i, nv+edge_index(emap, {q.z, q.w})});
-    }
-    else {
+    } else {
       tquads.push_back({q.x, nv+edge_index(emap, {q.x, q.y}),
         nv+ne+i, nv+edge_index(emap, {q.z, q.x})});
       tquads.push_back({q.y, nv+edge_index(emap, {q.y, q.z}),
@@ -1487,81 +1490,59 @@ static void tesselate_catmullclark(
     }
   }
 
-  // setup boundary
-  auto tboundary = vector<vec2i>();
+      auto tboundary = vector<vec2i>();
   for (auto e : boundary) {
-    tboundary.push_back({e.x, nv+edge_index(emap, e)});
-    tboundary.push_back({nv+edge_index(emap,e), e.y});
+  tboundary.push_back({e.x, nv+edge_index(emap, e)});
+  tboundary.push_back({nv+edge_index(emap, e), e.y});
   }
-
   auto tcrease_edges = vector<vec2i>();
   auto tcrease_verts = vector<int>();
-
-  if (lock_boundary) {
+    if (lock_boundary) {
     for (auto& b : tboundary) {
       tcrease_verts.push_back(b.x);
       tcrease_verts.push_back(b.y);
     }
-  }
-  else {
-    for (auto& b : tboundary) {
-      tcrease_edges.push_back(b);
-    }
+  } else {
+    for (auto& b : tboundary) tcrease_edges.push_back(b);
   }
 
-  printf("tcr_v size: %d\n", tcrease_verts.size());
-
-  auto tvert_val = vector<int>(tverts.size(), 2);
+  auto tverts_val = vector<int>(tverts.size(), 2);
   for (auto& e : tboundary) {
-    tvert_val[e.x] = lock_boundary ? 0 : 1;
-    tvert_val[e.y] = lock_boundary ? 0 : 1;
+    tverts_val[e.x] = (lock_boundary) ? 0 : 1;
+    tverts_val[e.y] = (lock_boundary) ? 0 : 1;
   }
-
-  /* averaging pass */
-  auto avert = vector<T>(tverts.size(), T{});
+  auto averts = vector<T>(tverts.size(), T());
   auto acount = vector<int>(tverts.size(), 0);
   for (auto p : tcrease_verts) {
-    if (tvert_val[p] != 0) continue;
-
-    avert[p] += tverts[p];
-    acount[p] = 1;
+  if (tverts_val[p] != 0) continue;
+    averts[p] += tverts[p]; acount[p] += 1;
   }
-
   for (auto& e : tcrease_edges) {
-    auto c = (tverts[e.x] + tverts[e.y]) / 2;
-    for (auto vid : e) {
-      if (tvert_val[vid] != 1) continue;
-      avert[vid] += c;
-      acount[vid] += 1;
+  auto c = (tverts[e.x] + tverts[e.y]) / 2;
+  for (auto vid : e) {
+    if (tverts_val[vid] != 1) continue;
+    averts[vid] += c; acount[vid] += 1;
     }
   }
-
   for (auto& q : tquads) {
     auto c = (tverts[q.x] + tverts[q.y] +
-              tverts[q.z] + tverts[q.w]) / 4;
+    tverts[q.z] + tverts[q.w]) / 4;
     for (auto vid : q) {
-      if (tvert_val[vid] != 2) continue;
-      avert[vid] += c;
-      acount[vid] += 1;
-    }
+      if (tverts_val[vid] != 2) continue;
+        averts[vid] += c; acount[vid] += 1;
+      }
   }
+  for (auto i = 0; i < tverts.size(); i++)
+    averts[i] /= (float)acount[i];
 
   for (auto i = 0; i < tverts.size(); i++) {
-    avert[i] /= (float)acount[i];
+    if (tverts_val[i] != 2) continue;
+    averts[i] = tverts[i] +
+    (averts[i] - tverts[i]) * (4 / (float)acount[i]);
   }
-
-  /* correction pass */
-  for (auto i = 0; i < tverts.size(); i++) {
-    if (tvert_val[i] !=2) continue;
-    avert[i] = tverts[i] + (avert[i] - tverts[i]) * (4 / (float)acount[i]);
-  }
-
-  tverts = avert;
-  quads.clear();
-  vert.clear();
-
-  quads = tquads;
-  vert = tverts;
+  tverts = averts;
+  vert = (tverts);
+  quads = (tquads);
 }
 
 void tesselate_shape(pathtrace_shape* shape) {
