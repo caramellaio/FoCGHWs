@@ -225,7 +225,6 @@ static pair<vec3f, vec3f> eval_element_tangents(
 
 static vec3f eval_normalmap(
     const pathtrace_instance* instance, int element, const vec2f& uv) {
-  // YOUR CODE GOES HERE -----------------------------------------------------
   auto shape      = instance->shape;
   auto normal_tex = instance->material->normal_tex;
   // apply normal mapping
@@ -1106,8 +1105,115 @@ static vec4f shade_path(const pathtrace_scene* scene, const ray3f& ray_,
 // Path tracing.
 static vec4f shade_volpath(const pathtrace_scene* scene, const ray3f& ray_,
     rng_state& rng, const pathtrace_params& params) {
-  // YOUR CODE GOES HERE ----------------------------------------------------
-  return shade_path(scene, ray_, rng, params);
+
+  // initialize
+  auto radiance = zero3f;
+  auto weight   = vec3f{1, 1, 1};
+  auto ray      = ray_;
+  auto volume_stack = vector<pathtrace_vsdf>();
+  auto in_volume = false;
+
+  for (auto bounce = 0; bounce < params.bounces; bounce++) {
+    // intersect next point
+    auto intersection = intersect_scene_bvh(scene, ray);
+    if (!intersection.hit) {
+      radiance += weight * eval_environment(scene, ray);
+      break;
+    }
+
+    // prepare shading point
+    auto outgoing = -ray.d;
+    auto instance = scene->instances[intersection.instance];
+    auto element  = intersection.element;
+    auto uv       = intersection.uv;
+
+    if (!volume_stack.empty()) {
+      auto extinction = volume_stack.back().density;
+      auto distance = sample_transmittance(
+          extinction, intersection.distance, rand1f(rng), rand1f(rng));
+
+      weight *= eval_transmittance(extinction, distance);
+
+      in_volume = distance < intersection.distance;
+      intersection.distance = distance;
+    }
+
+    if (! in_volume) {
+      auto position = eval_position(instance, element, uv);
+      auto normal   = eval_shading_normal(instance, element, uv, outgoing);
+      auto emission = eval_emission(instance, element, uv, normal, outgoing);
+      auto brdf     = eval_brdf(instance, element, uv, normal, outgoing);
+      auto outgoing = -ray.d;
+
+      // handle opacity
+      if (brdf.opacity < 1 && rand1f(rng) >= brdf.opacity) {
+        ray = {position + ray.d * 1e-2f, ray.d};
+        bounce -= 1;
+        continue;
+      }
+
+      radiance += weight * emission;
+
+      auto incoming = zero3f;
+
+      if (!is_delta(brdf)) {
+        if (rand1f(rng) < 0.5f) {
+          incoming = sample_brdfcos(
+              brdf, normal, outgoing, rand1f(rng), rand2f(rng));
+        } else {
+          incoming = sample_lights(
+              scene, position, rand1f(rng), rand1f(rng), rand2f(rng));
+        }
+        weight *= eval_brdfcos(brdf, normal, outgoing, incoming) /
+                  (0.5f * sample_brdfcos_pdf(brdf, normal, outgoing, incoming) +
+                      0.5f * sample_lights_pdf(scene, position, incoming));
+      } else {
+        incoming = sample_delta(brdf, normal, outgoing, rand1f(rng));
+        weight *= eval_delta(brdf, normal, outgoing, incoming) /
+                  sample_delta_pdf(brdf, normal, outgoing, incoming);
+      }
+
+      // setup next iteration
+      ray = {position, incoming};
+
+      if (has_volume(instance) && dot(normal, outgoing) * dot(normal, incoming) <= 0) {
+        if (volume_stack.empty())
+          volume_stack.push_back(eval_vsdf(instance, element, uv));
+      }
+    }
+    else {
+      auto position = ray.o + ray.d * intersection.distance;
+      auto volume = volume_stack.back();
+      auto outgoing = -ray.d;
+      auto normal = eval_shading_normal(instance, element, uv, outgoing);
+      auto emission = eval_emission(instance, element, uv, normal, outgoing);
+
+      radiance += weight * emission;
+
+      auto incoming = rand1f(rng) <= 0.5f ?
+        sample_scattering(volume, outgoing, rand1f(rng), rand2f(rng)) :
+        sample_lights(scene, position, rand1f(rng), rand1f(rng), rand2f(rng));
+
+      weight *= eval_scattering(volume, outgoing, incoming) * 2 /
+        (sample_scattering_pdf(volume, outgoing, incoming) +
+         sample_lights_pdf(scene, position, incoming));
+
+      ray = {position, incoming};
+    }
+
+    // check weight
+    if (weight == zero3f || !isfinite(weight)) break;
+
+    // russian roulette
+    if (bounce > 3) {
+      auto rr_prob = min((float)0.99, max(weight));
+      if (rand1f(rng) >= rr_prob) break;
+      weight *= 1 / rr_prob;
+    }
+
+  }
+
+  return {radiance.x, radiance.y, radiance.z, 0};
 }
 
 // Path tracing.
