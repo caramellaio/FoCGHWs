@@ -1083,20 +1083,18 @@ static float sample_lights_pdf(const pathtrace_scene* scene,
 
 static vec3f eval_scattering(
     const pathtrace_vsdf& vsdf, const vec3f& outgoing, const vec3f& incoming) {
-  // YOUR CODE GOES HERE ----------------------------------------------------
-  return zero3f;
+  return vsdf.density * vsdf.scatter *
+    eval_phasefunction(vsdf.anisotropy, outgoing, incoming);
 }
 
 static vec3f sample_scattering(const pathtrace_vsdf& vsdf,
     const vec3f& outgoing, float rnl, const vec2f& rn) {
-  // YOUR CODE GOES HERE ----------------------------------------------------
-  return zero3f;
+  return sample_phasefunction(vsdf.anisotropy, outgoing, rn);
 }
 
 static float sample_scattering_pdf(
     const pathtrace_vsdf& vsdf, const vec3f& outgoing, const vec3f& incoming) {
-  // YOUR CODE GOES HERE ----------------------------------------------------
-  return 0;
+  return sample_phasefunction_pdf(vsdf.anisotropy, outgoing, incoming);
 }
 
 static vec4f shade_path(const pathtrace_scene* scene, const ray3f& ray_,
@@ -1128,11 +1126,12 @@ static vec4f shade_volpath(const pathtrace_scene* scene, const ray3f& ray_,
     auto uv       = intersection.uv;
 
     if (!volume_stack.empty()) {
-      auto extinction = volume_stack.back().density;
+      auto density = volume_stack.back().density;
       auto distance = sample_transmittance(
-          extinction, intersection.distance, rand1f(rng), rand1f(rng));
+          density, intersection.distance, rand1f(rng), rand1f(rng));
 
-      weight *= eval_transmittance(extinction, distance);
+      weight *= eval_transmittance(density, distance) /
+        sample_transmittance_pdf(density, distance, intersection.distance);
 
       in_volume = distance < intersection.distance;
       intersection.distance = distance;
@@ -1177,8 +1176,10 @@ static vec4f shade_volpath(const pathtrace_scene* scene, const ray3f& ray_,
       ray = {position, incoming};
 
       if (has_volume(instance) && dot(normal, outgoing) * dot(normal, incoming) <= 0) {
-        if (volume_stack.empty())
+        if (volume_stack.empty()) {
           volume_stack.push_back(eval_vsdf(instance, element, uv));
+        }
+        else { volume_stack.pop_back(); };
       }
     }
     else {
@@ -1186,7 +1187,8 @@ static vec4f shade_volpath(const pathtrace_scene* scene, const ray3f& ray_,
       auto volume = volume_stack.back();
       auto outgoing = -ray.d;
       auto normal = eval_shading_normal(instance, element, uv, outgoing);
-      auto emission = eval_emission(instance, element, uv, normal, outgoing);
+      auto emission = eval_emission(instance, element, uv, normal, outgoing) *
+        volume.density * (1 - volume.scatter);
 
       radiance += weight * emission;
 
